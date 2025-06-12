@@ -35,7 +35,7 @@ GENERATOR_POLY_COEFFS = [
     43, 44, 27, 7, 53, 39, 62, 52, 41, 44, 1
 ]
 # MSB
-GENERATOR_POLY_COEFFS = list(reversed(GENERATOR_POLY_COEFFS))
+# GENERATOR_POLY_COEFFS = list(reversed(GENERATOR_POLY_COEFFS))
 
 # g(alpha^i) values for i = 0..62, directly from project sheet
 G_EVAL_LIST = [
@@ -82,7 +82,8 @@ def gf_pow(a, n):
 def poly_eval(poly_coeffs, x):
     result = 0
     power = 1
-    for coeff in reversed(poly_coeffs):  # MSB 
+    for coeff in (poly_coeffs):  # MSB 
+    # for coeff in reversed(poly_coeffs):  # MSB 
         result = gf_add(gf_mul(coeff, power), result)
         power = gf_mul(power, x)
     return result
@@ -100,4 +101,5 @@ def verify_generator_polynomial():
     if passed:
         print("All g(alpha^i) values match the official table.")
 
-
+if __name__ == "__main__":
+    verify_generator_polynomial()

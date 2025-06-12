@@ -16,7 +16,7 @@ rs_codec/
 ### gf.py: Galois Field Arithmetic for GF(2^6)
 
 This module implements finite field operations over GF(2^6), using the primitive element α defined by the irreducible polynomial:
-    α^6 + α + 1 = 0
+    $\alpha^6 + \alpha + 1 = 0$
 
 It uses precomputed exponentiation and logarithm tables derived from the project specification.
 
@@ -31,6 +31,6 @@ Features:
     - poly_eval(poly_coeffs, x): Evaluates a polynomial at x using Horner's method
       (coefficients must be in MSB-first order)
 - Generator polynomial verification:
-    - verify_generator_polynomial(): Confirms that g(α^i) matches CCC's reference table
+    - verify_generator_polynomial(): Confirms that $g(\alpha^i)$ matches CCC's reference table
 
-Status: Fully tested. All g(α^i) values match the official table.
+Status: Fully tested. All g($\alpha^i$) values match the official table.
