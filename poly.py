@@ -3,18 +3,18 @@ from gf import gf_add, gf_sub, gf_mul, gf_div
 def poly_add(f: list[int], g: list[int]) -> list[int]:
     """
     Add two polynomials over GF(2^6).
-    Input: f, g in MSB-first order
-    Output: (f + g) in MSB-first order
+    Input: f, g in LSB-first order
+    Output: (f + g) in LSB-first order
     """
     max_len = max(len(f), len(g))
-    f = [0]*(max_len - len(f)) + f
-    g = [0]*(max_len - len(g)) + g
+    f =  f + [0]*(max_len - len(f)) 
+    g =  g + [0]*(max_len - len(g)) 
     return [gf_add(a, b) for a, b in zip(f, g)]
 
 def poly_mul(f: list[int], g: list[int]) -> list[int]:
     """
     Multiply two polynomials over GF(2^6).
-    Output: (f * g) in MSB-first order
+    Output: (f * g) in LSB-first order
     """
     result = [0] * (len(f) + len(g) - 1)
     for i, a in enumerate(f):
@@ -32,26 +32,33 @@ def poly_shift(p: list[int], n: int) -> list[int]:
     """
     Multiply polynomial by x^n (append n zeros to the right).
     """
-    return p + [0]*n
+    return [0]*n + p
 
 def poly_deg(p: list[int]) -> int:
     """
     Return the degree of the polynomial.
-    Leading zeros are ignored.
     """
-    for i, c in enumerate(p):
-        if c != 0:
-            return len(p) - 1 - i
-    return -1  # p(x) = 0
+    # for i, c in enumerate(p):
+    #     if c != 0:
+    #         return len(p) - 1 - i
+    # return -1  # p(x) = 0
+    # p = poly_trim(p)
+    # return -1 if len(p) == 1 and p[0] == 0 else len(p)-1 
+    for i in reversed(range(len(p))):
+        if p[i] != 0:
+            return i
+    return -1
+
 
 def poly_trim(p: list[int]) -> list[int]:
     """
     Remove leading zeros (return canonical form).
     """
-    i = 0
-    while i < len(p) and p[i] == 0:
-        i += 1
-    return p[i:] if i < len(p) else [0]
+    i = len(p)-1 
+    while i+1 and p[i] == 0:
+        i -= 1
+    return p[:i+1] if i+1 else [0]
+
 
 def poly_divmod(f: list[int], g: list[int]) -> tuple[list[int], list[int]]:
     """
@@ -71,11 +78,12 @@ def poly_divmod(f: list[int], g: list[int]) -> tuple[list[int], list[int]]:
 
     while poly_deg(remainder) >= deg_g:
         shift = poly_deg(remainder) - deg_g 
-        lead_coeff = gf_div(remainder[0], g[0])
+        lead_coeff = gf_div(remainder[-1], g[-1])
 
         # construct term = lead_coeff * x^shift * g(x)
         scaled_g = poly_scale(g, lead_coeff)
-        aligned_g = scaled_g + [0] * shift  # right-padding for MSB alignment
+        aligned_g =[0] * shift + scaled_g   # left-padding for LSB alignment
+
 
         # quotient[shift-from-left]
         quotient[shift] = lead_coeff
@@ -84,59 +92,50 @@ def poly_divmod(f: list[int], g: list[int]) -> tuple[list[int], list[int]]:
         remainder = poly_trim(poly_add(remainder, aligned_g))
 
 
-    return (list(reversed(quotient)), remainder)
+    return (quotient, remainder)
+    # return (list(reversed(quotient)), remainder)
 
-def extended_euclidean_limited(a: list[int], b: list[int], mu: int, nu: int) -> tuple[list[int], list[int]]:
+
+def extended_euclidean(a: list[int], b: list[int], mu: int, nu: int) -> tuple[list[int], list[int]]:
     """
-    Extended Euclidean Algorithm with early stopping.
-    Solves a(x) = x^r, b(x) = modified syndrome
-    Stops when deg(σ1) <= mu and deg(ω) <= nu
+    Full Extended Euclidean Algorithm (LSB-first) for polynomials over GF(2^6).
+    Follows notation from classical coding theory texts (Section 9.4):
+        u(x)a(x) + v(x)b(x) = d(x)
+
+    Args:
+        a: Dividend polynomial, LSB-first
+        b: Divisor polynomial, LSB-first
 
     Returns:
-        - σ1(x) = s(x)
-        - ω(x) = r(x)
+        (gcd, u(x), v(x)) in LSB-first
     """
-    r0, r1 = a[:], b[:]
-    s0, s1 = [1], [0]
 
-    while True:
-        if poly_deg(r1) <= nu and poly_deg(s1) <= mu:
-            break
-        q, r = poly_divmod(r0, r1)
-        r0, r1 = r1, r
-        s0, s1 = s1, poly_add(s0, poly_mul(q, s1))
+    # Initializations: r_{-1}, r_0
+    r_prev = poly_trim(a)
+    r_curr = poly_trim(b)
 
-    return s1, r1
+    # u_{-1}, u_0
+    u_prev = [1]
+    u_curr = [0]
 
+    # v_{-1}, v_0
+    v_prev = [0]
+    v_curr = [1]
 
-#############################################################
-def test_extended_euclidean_limited():
-    # Example:
-    # a(x) = x^5
-    # b(x) = 12x^4 + 32x^3 + 5x^2 + 2x + 1 (MSB-first)
-    a = [1] + [0]*5             # x^5
-    b = [12, 32, 5, 2, 1]       # arbitrary syndrome poly
+    while poly_deg(r_curr) > nu or poly_deg(v_curr) > mu:
+        # print(v_curr, r_curr)
+        # print(poly_deg(r_curr), poly_deg(v_curr), nu, mu)
+        q, r_next = poly_divmod(r_prev, r_curr)
 
-    # Let's say no erasures: e0 = 0, r = 5
-    mu = (5 - 0) // 2   # = 2
-    nu = (5 + 0 + 1) // 2 - 1  # = 2
+        # Update r
+        r_prev, r_curr = r_curr, r_next
 
-    sigma1, omega = extended_euclidean_limited(a, b, mu, nu)
+        # Update u_i = u_{i-2} + q_i * u_{i-1}
+        u_prev, u_curr = u_curr, poly_trim(poly_add(u_prev, poly_mul(q, u_curr)))
 
-    # Now check if sigma1 * b ≡ omega mod x^5
-    product = poly_mul(sigma1, b)
-    _, remainder = poly_divmod(product, a)
+        # Update v_i = v_{i-2} + q_i * v_{i-1}
+        v_prev, v_curr = v_curr, poly_trim(poly_add(v_prev, poly_mul(q, v_curr)))
+        # print(v_curr, r_curr)
+        # print(poly_deg(r_curr), poly_deg(v_curr), nu, mu)
 
-    # Check correctness
-    if poly_trim(remainder) == poly_trim(omega):
-        print("✅ Test passed: sigma1*S0 ≡ omega mod x^r")
-    else:
-        print("❌ Test failed!")
-        print(f"sigma1(x): {sigma1}")
-        print(f"omega(x):  {omega}")
-        print(f"recomputed omega: {remainder}")
-
-
-
-if __name__ == "__main__":
-    test_extended_euclidean_limited()
+    return v_curr, r_curr  

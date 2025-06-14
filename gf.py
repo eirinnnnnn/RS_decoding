@@ -5,7 +5,6 @@ Define the $GF(2^6)$ by the given generator polynomial.
 - polynomial evaluator poly_eval()
 '''
 
-# gf.py — GF(2^6) arithmetic for RS(63, 42)
 
 # EXP_TABLE[i] = α^i \forall i \in {0,\ldots,62}
 EXP_TABLE = [
@@ -29,13 +28,10 @@ LOG_TABLE = [None] * 64
 for i, val in enumerate(EXP_TABLE):
     LOG_TABLE[val] = i
 
-# Generator polynomial coefficients for RS(63, 42)
 GENERATOR_POLY_COEFFS = [
     58, 62, 59, 7, 35, 58, 63, 47, 51, 6, 33,
     43, 44, 27, 7, 53, 39, 62, 52, 41, 44, 1
 ]
-# MSB
-# GENERATOR_POLY_COEFFS = list(reversed(GENERATOR_POLY_COEFFS))
 
 # g(alpha^i) values for i = 0..62, directly from project sheet
 G_EVAL_LIST = [
@@ -54,7 +50,7 @@ def gf_add(a, b):
     return a ^ b
 
 def gf_sub(a, b):
-    return a^b 
+    return a ^ b
 
 def gf_mul(a, b):
     if a == 0 or b == 0:
@@ -82,10 +78,10 @@ def gf_pow(a, n):
 def poly_eval(poly_coeffs, x):
     result = 0
     power = 1
-    for coeff in (poly_coeffs):  # MSB 
-    # for coeff in reversed(poly_coeffs):  # MSB 
+    for coeff in (poly_coeffs):  # LSB first 
         result = gf_add(gf_mul(coeff, power), result)
         power = gf_mul(power, x)
+    # the sequence does not actually matter?
     return result
 
 # Verification: does g(alpha^i) match expected values?
