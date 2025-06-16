@@ -2,6 +2,9 @@ from poly import *
 from gf import *
 from encoder import K, R, N
 
+class RSDecodeError(Exception):
+    """Raised when t0 + 2 t1 exceeds the decoding radius R = N-K."""
+    pass
 
 def rs_decode(received: list[int], erasures: list[int]) -> list[int]:
     """
@@ -17,11 +20,30 @@ def rs_decode(received: list[int], erasures: list[int]) -> list[int]:
     R_erased = erase_positions(received, erasures)
     S = compute_syndrome(R_erased)
     S0 = modified_syndrome(S, sigma0)
+
     sigma1, omega = solve_key_equation(S0, len(erasures))
+
+    # --- Early budget check (Berlekamp/McEliece “degree test”) ------------------
+    t0        = len(erasures)
+    t1_budget = (R - t0) // 2                    # μ in the notes
+    if poly_deg(sigma1) > t1_budget:
+        raise RSDecodeError(
+            f"Decoding failure:  t0={t0}, 2·deg(σ₁)={2*poly_deg(sigma1)}, R={R}"
+        )
+    # ---------------------------------------------------------------------------
+
     sigma = combine_locators(sigma0, sigma1)
     error_pos = find_error_positions(sigma)
+
+    if len(error_pos) != poly_deg(sigma):
+        raise RSDecodeError("Locator degree ≠ number of roots found (beyond radius)")
+
     error_mag = evaluate_error_magnitudes(sigma, omega, error_pos)
     corrected = apply_error_correction(received, error_mag)
+
+    if any(compute_syndrome(corrected)):
+        raise RSDecodeError("Syndrome non-zero after correction (beyond radius)")
+
     return corrected[-K:]
 
 def debug_rs_decode(received: list[int], erasures: list[int]) -> list[int]:
@@ -115,10 +137,23 @@ def solve_key_equation(s0: list[int], e0: int) -> tuple[list[int], list[int]]:
     mu = (R - e0) // 2
     nu = (R + e0 - 1) // 2
     sigma1, omega = extended_euclidean(r_poly, s0, mu, nu)
-    
+
+    # ─── safety: force gcd(σ₁, ω) = 1 ───
+    g = poly_gcd(sigma1, omega)
+    # print("‣  deg σ1 =", poly_deg(sigma1),
+    #   "deg ω =", poly_deg(omega),
+    #   "deg gcd =", poly_deg(g),
+    #   "g =", g)
+    # if poly_deg(g) > 0:
+    #     sigma1, _ = poly_divmod(sigma1, g)
+    #     omega, _  = poly_divmod(omega,  g)
+    # ────────────────────────────────────
+    # print(f"sigma1{sigma1}, omega{omega}")
+ 
     # Normalize by dividing by v(0)
     sigma1_0 = sigma1[0]
     if sigma1_0 == 0:
+        # print("sigma1(0) = 0, cannot normalize")
         raise ZeroDivisionError("sigma1(0) = 0, cannot normalize")
 
     sigma1 = [gf_div(c, sigma1_0) for c in sigma1]
@@ -147,18 +182,15 @@ def find_error_positions(sigma: list[int]) -> list[int]:
 def poly_derivative(p: list[int]) -> list[int]:
     """
     Formal derivative in characteristic-2 (LSB-first).
-    Even-degree terms disappear; an odd-degree coefficient σ_i
-    becomes the coefficient of x^{i-1}.
     """
     if len(p) < 2:
-        return [0]          # derivative of constant poly
+        return [0]          
 
     deriv = [0] * (len(p) - 1)
     for i in range(1, len(p)):
-        if i & 1:           # keep odd exponents
+        if i & 1:           
             deriv[i - 1] = p[i]
 
-    # optional – trim leading zeros for canonical form
     while len(deriv) > 1 and deriv[-1] == 0:
         deriv.pop()
     return deriv

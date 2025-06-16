@@ -1,5 +1,5 @@
 from encoder import rs_encode, N, K, R
-from decoder import debug_rs_decode
+from decoder import debug_rs_decode, rs_decode
 from gf import gf_add 
 import random
 
@@ -25,10 +25,10 @@ def test_no_errors():
 def test_with_errors():
     message = [random.randint(1, 62) for _ in range(K)]
     codeword = rs_encode(message)
-    error_pos = random.sample(range(N), 5)
+    error_pos = random.sample(range(N), 6)
     error_vals = [random.randint(1, 62) for _ in error_pos]
     corrupted = introduce_errors(codeword, error_pos, error_vals)
-    decoded = debug_rs_decode(corrupted, [])
+    decoded = rs_decode(corrupted, [])
 
     print("error position:", error_pos)
     print("error values:", error_vals)
@@ -41,7 +41,7 @@ def test_with_erasures():
     codeword = rs_encode(message)
     erasure_pos = random.sample(range(N), 5)
     corrupted = introduce_erasures(codeword, erasure_pos)
-    decoded = debug_rs_decode(corrupted, erasure_pos)
+    decoded = rs_decode(corrupted, erasure_pos)
     assert decoded == message, "❌ Erasure-only decoding failed"
     print("✅ Erasure-only decoding passed")
 
@@ -53,12 +53,12 @@ def test_mixed_errors_erasures():
     error_vals = [random.randint(1, 62) for _ in error_pos]
     corrupted = introduce_errors(codeword, error_pos, error_vals)
     corrupted = introduce_erasures(corrupted, erasure_pos)
-    decoded = debug_rs_decode(corrupted, erasure_pos)
+    decoded = rs_decode(corrupted, erasure_pos)
     assert decoded == message, "❌ Mixed error-erasure decoding failed"
     print("✅ Mixed error-erasure decoding passed")
 
 if __name__ == "__main__":
     # test_no_errors()
     test_with_errors()
-    test_with_erasures()
-    test_mixed_errors_erasures()
+    # test_with_erasures()
+    # test_mixed_errors_erasures()

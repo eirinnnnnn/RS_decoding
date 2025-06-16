@@ -27,7 +27,7 @@ def rs_encode(message: list[int]) -> list[int]:
     # Pad parity to R symbols (in case deg(r) < R - 1)
     parity = poly_trim(remainder) 
 
-    return poly_trim(poly_add(parity,  m_shifted))
+    return (poly_add(parity,  m_shifted))
 
 def test_rs_encode_no_errors():
     msg = [i for i in range(42)]

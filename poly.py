@@ -1,4 +1,4 @@
-from gf import gf_add, gf_sub, gf_mul, gf_div
+from gf import *
 
 def poly_add(f: list[int], g: list[int]) -> list[int]:
     """
@@ -57,7 +57,14 @@ def poly_trim(p: list[int]) -> list[int]:
     i = len(p)-1 
     while i+1 and p[i] == 0:
         i -= 1
-    return p[:i+1] if i+1 else [0]
+    return p[:i+1]
+
+def poly_make_monic(p):
+    p = poly_trim(p)
+    if not p:
+        return []
+    inv = gf_inv(p[-1])               # last coeff is the leading term
+    return [gf_mul(c, inv) for c in p]
 
 
 def poly_divmod(f: list[int], g: list[int]) -> tuple[list[int], list[int]]:
@@ -95,6 +102,20 @@ def poly_divmod(f: list[int], g: list[int]) -> tuple[list[int], list[int]]:
     return (quotient, remainder)
     # return (list(reversed(quotient)), remainder)
 
+# ──────────────────────────────────────────────────────────────
+# Greatest–common divisor for LSB-first polynomials over GF(2^m)
+# ──────────────────────────────────────────────────────────────
+def poly_gcd(a: list[int], b: list[int]) -> list[int]:
+    a = poly_trim(a)
+    b = poly_trim(b)
+    if not b:                         # gcd(a, 0) = monic(a)
+        return poly_make_monic(a)
+
+    while b:
+        _, r = poly_divmod(a, b)      # b is non-zero here
+        a, b = b, poly_trim(r)
+
+    return poly_make_monic(a)         # ensure leading coef = 1 (see below)
 
 def extended_euclidean(a: list[int], b: list[int], mu: int, nu: int) -> tuple[list[int], list[int]]:
     """
@@ -122,7 +143,8 @@ def extended_euclidean(a: list[int], b: list[int], mu: int, nu: int) -> tuple[li
     v_prev = [0]
     v_curr = [1]
 
-    while poly_deg(r_curr) > nu or poly_deg(v_curr) > mu:
+    while poly_deg(r_curr) > nu:
+    # while poly_deg(r_curr) > nu or poly_deg(v_curr) > mu:
         # print(v_curr, r_curr)
         # print(poly_deg(r_curr), poly_deg(v_curr), nu, mu)
         q, r_next = poly_divmod(r_prev, r_curr)
