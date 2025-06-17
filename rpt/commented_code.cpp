@@ -1,6 +1,3 @@
-#define DBG(x) do { if (debug) { x; } } while (0)
-static bool debug = true;      // flip to false when you’re satisfied
-
 #include <iostream>
 #include <vector>
 #include <stdexcept>
@@ -8,10 +5,10 @@ static bool debug = true;      // flip to false when you’re satisfied
 #include <sstream>
 #include <map>
 #include <algorithm>
-#include <cmath> 
 
 
 using namespace std;
+
 const int N = 63;
 const int K = 42;
 const int R = N - K;
@@ -22,7 +19,7 @@ struct RSDecodeError : public std::exception {
     const char* what() const noexcept override { return message.c_str(); }
 };
 
-// EXP_TABLE[i] = α^i
+// EXP_TABLE[i] = alpha^i
 const int EXP_TABLE[63] = {
     1, 2, 4, 8, 16, 32, 3, 6, 12, 24,
     48, 35, 5, 10, 20, 40, 19, 38, 15, 30,
@@ -216,28 +213,30 @@ pair<vector<int>, vector<int>> extended_euclidean(vector<int> a, vector<int> b, 
     vector<int> u_prev = {1}, u_curr = {0};
     vector<int> v_prev = {0}, v_curr = {1};
 
-    while (poly_deg(r_curr) > nu || poly_deg(v_curr) > mu) {
+    while (poly_deg(r_curr) > nu) {
+        // r_prev = q_next*r_curr + r_next
         auto [q, r_next] = poly_divmod(r_prev, r_curr);
         r_prev = r_curr;
         r_curr = r_next;
 
+        // u_i = u_{i-2} + q_i * u_{i-1}
         vector<int> u_next = poly_trim(poly_add(u_prev, poly_mul(q, u_curr)));
         u_prev = u_curr;
         u_curr = u_next;
 
+        // v_i = v_{i-2} + q_i * v_{i-1}
         vector<int> v_next = poly_trim(poly_add(v_prev, poly_mul(q, v_curr)));
         v_prev = v_curr;
         v_curr = v_next;
     }
 
-    return {v_curr, r_curr}; // (σ1, ω)
+    return {v_curr, r_curr}; // (sigma1, omega)
 }
 
 vector<int> build_erasure_locator(const vector<int>& erasures) {
     vector<int> sigma0 = {1};
     for (int i : erasures) {
-        vector<int> term = {1, gf_sub(0, EXP_TABLE[i])};
-        // vector<int> term = {gf_sub(0, EXP_TABLE[i]), 1};
+        vector<int> term = {1, gf_sub(0, EXP_TABLE[i])}; // 1 - \alpha^i x
         sigma0 = poly_mul(sigma0, term);
     }
     return sigma0;
@@ -250,6 +249,7 @@ vector<int> erase_positions(vector<int> received, const vector<int>& erasures) {
 }
 
 vector<int> compute_syndrome(const vector<int>& received) {
+    // S_j = \sum R_i * alpha^{ij} \forall j = 1 \ldots R
     vector<int> S;
     for (int j = 1; j <= R; ++j)
         S.push_back(poly_eval(received, EXP_TABLE[j]));
@@ -257,6 +257,7 @@ vector<int> compute_syndrome(const vector<int>& received) {
 }
 
 vector<int> modified_syndrome(const vector<int>& syndrome, const vector<int>& sigma0) {
+    // S0(x) = sigma0(x) * S(x) mod x^r
     vector<int> S0 = poly_mul(sigma0, syndrome);
     S0.resize(R);
     return S0;
@@ -265,121 +266,27 @@ vector<int> modified_syndrome(const vector<int>& syndrome, const vector<int>& si
 pair<vector<int>, vector<int>> solve_key_equation(const vector<int>& s0, int e0) {
     vector<int> r_poly(R + 1, 0);
     r_poly[R] = 1;
-    // int mu = (R - e0) / 2;
-    // int nu = (R + e0 - 1) / 2;
-
-    int mu = static_cast<int>(floor((R - e0) / 2.0));
-    int nu = static_cast<int>(ceil((R + e0) / 2.0)) - 1;
+    int mu = (R - e0) / 2;
+    int nu = (R + e0 - 1) / 2;
 
     auto [sigma1, omega] = extended_euclidean(r_poly, s0, mu, nu);
 
-    // Optional normalization
     int sigma1_0 = sigma1[0];
     if (sigma1_0 == 0)
-        throw RSDecodeError("sigma1(0) = 0, cannot normalize");
+        throw RSDecodeError("Condition (B) violated, sigma1(0) = 0");
 
     for (int& c : sigma1) c = gf_div(c, sigma1_0);
     for (int& c : omega) c = gf_div(c, sigma1_0);
 
     return {sigma1, omega};
 }
-bool solve_linear_system(vector<vector<int>> A, vector<int> b, vector<int>& sol) {
-    int m = A.size();
-    int n = A[0].size();
-    sol.assign(n, 0);
-
-    for (int col = 0, row = 0; col < n && row < m; ++col) {
-        int sel = -1;
-        for (int i = row; i < m; ++i) {
-            if (A[i][col] != 0) {
-                sel = i;
-                break;
-            }
-        }
-        if (sel == -1) continue;
-
-        swap(A[sel], A[row]);
-        swap(b[sel], b[row]);
-
-        int inv = gf_inv(A[row][col]);
-        for (int j = col; j < n; ++j)
-            A[row][j] = gf_mul(A[row][j], inv);
-        b[row] = gf_mul(b[row], inv);
-
-        for (int i = 0; i < m; ++i) {
-            if (i != row && A[i][col] != 0) {
-                int f = A[i][col];
-                for (int j = col; j < n; ++j)
-                    A[i][j] = gf_sub(A[i][j], gf_mul(f, A[row][j]));
-                b[i] = gf_sub(b[i], gf_mul(f, b[row]));
-            }
-        }
-        ++row;
-    }
-
-    // Back-substitution: now A should be reduced to row-echelon form
-    for (int i = 0, j = 0; i < m && j < n; ++j) {
-        if (A[i][j] == 1) {
-            sol[j] = b[i];
-            ++i;
-        }
-    }
-
-    return true; 
-}
-pair<vector<int>, vector<int>> solve_key_wb(const vector<int>& s0, int e0) {
-    int mu = (R - e0) / 2;
-    int nu = (R + e0 + 1) / 2 - 1;
-
-    int n_eqs = R;
-    int n_unknowns = (mu + 1) + (nu + 1); // coefficients of sigma1 and omega
-
-    vector<vector<int>> A(n_eqs, vector<int>(n_unknowns, 0));
-    vector<int> b(n_eqs, 0);
-
-    for (int j = 0; j < R; ++j) {
-        int x = EXP_TABLE[j + 1];
-        int Sj = poly_eval(s0, x);  // S0(α^j)
-        b[j] = Sj;
-
-        int power = 1;
-        for (int i = 0; i <= mu; ++i) {
-            A[j][i] = gf_mul(Sj, power); // S0 * x^i
-            power = gf_mul(power, x);
-        }
-
-        power = 1;
-        for (int i = 0; i <= nu; ++i) {
-            A[j][mu + 1 + i] = gf_sub(0, power); // -x^i for ω(x)
-            power = gf_mul(power, x);
-        }
-    }
-
-    // Solve the system A * [sigma1_coeffs | omega_coeffs]^T = b
-    vector<int> sol;
-    bool ok = solve_linear_system(A, b, sol); // You’ll need to implement this
-
-    if (!ok) throw RSDecodeError("WB solve failed");
-
-    vector<int> sigma1(sol.begin(), sol.begin() + mu + 1);
-    vector<int> omega(sol.begin() + mu + 1, sol.end());
-
-    if (sigma1[0] == 0)
-        throw RSDecodeError("WB failure: sigma1(0) = 0");
-
-    int inv = gf_inv(sigma1[0]);
-    for (int& c : sigma1) c = gf_mul(c, inv);
-    for (int& c : omega) c = gf_mul(c, inv);
-
-    return {sigma1, omega};
-}
-
 
 vector<int> combine_locators(const vector<int>& sigma0, const vector<int>& sigma1) {
     return poly_mul(sigma0, sigma1);
 }
 
 vector<int> find_error_positions(const vector<int>& sigma) {
+    // time-domain implementation
     vector<int> positions;
     for (int i = 0; i < N; ++i) {
         int x_inv = EXP_TABLE[(63 - i) % 63];
@@ -407,7 +314,7 @@ map<int, int> evaluate_error_magnitudes(const vector<int>& sigma, const vector<i
         int num = poly_eval(omega, x_inv);
         int denom = poly_eval(sigma_prime, x_inv);
         if (denom == 0)
-            throw RSDecodeError("σ'(α^-" + to_string(i) + ") = 0 during Forney eval");
+            throw RSDecodeError("sigma'(alpha^-" + to_string(i) + ") = 0 ");
         error_vector[i] = gf_sub(0, gf_div(num, denom));
     }
     return error_vector;
@@ -418,72 +325,46 @@ vector<int> apply_error_correction(vector<int> received, const map<int, int>& er
         received[i] = gf_sub(received[i], mag);
     return received;
 }
-auto print_poly = [](const string& name, const vector<int>& p) {
-    cout << "  " << name << " = [";
-    for (size_t i = 0; i < p.size(); ++i) {
-        cout << p[i];
-        if (i < p.size() - 1) cout << " ";
-    }
-    cout << "] (deg=" << poly_deg(p) << ")\n";
-};
-
-
 
 vector<int> rs_decode(const vector<int>& received, const vector<int>& erasures) {
     vector<int> sigma0 = build_erasure_locator(erasures);
     vector<int> R_erased = erase_positions(received, erasures);
     vector<int> S = compute_syndrome(R_erased);
     vector<int> S0 = modified_syndrome(S, sigma0);
-    if (poly_deg(S0)==-1) return vector<int>(received.end()-K, received.end());
 
-    // auto [sigma1, omega] = solve_key_wb(S0, erasures.size());
     auto [sigma1, omega] = solve_key_equation(S0, erasures.size());
-
+    if (poly_deg(omega) >= erasures.size() + poly_deg(sigma1)) {
+        throw RSDecodeError("Condition (A) violated: deg(omega) geq t_1 + deg(sigma_1)");
+    }
 
 
     int t0 = erasures.size();
-    cout << "  t0=" << t0 
-     << "  deg(σ1)=" << poly_deg(sigma1)
-     << "  deg(ω)=" << poly_deg(omega)
-     << "  deg(S)=" << poly_deg(S)
-     << "  deg(S0)=" << poly_deg(S0)
-     << "  deg(σ0)=" << poly_deg(sigma0) << endl;
-    print_poly("σ1", sigma1);
-    print_poly("ω", omega);
-    print_poly("S", S);
-    print_poly("S0", S0);
-    print_poly("σ0", sigma0);
-
-    if (poly_deg(omega) >= erasures.size() + poly_deg(sigma1)) {
-        //  << "deg(sigma1): " << poly_deg(sigma1) << ", deg(omega): " 
-        // << poly_deg(omega) << ", deg(sigma0) = " << poly_deg(sigma0) << endl;
-
-        throw RSDecodeError("Condition (A) violated: deg(ω)≥ t₀ + deg(σ₁)");
-    }
     int t1_budget = (R - t0) / 2;
     if (poly_deg(sigma1) > t1_budget) {
         throw RSDecodeError("Decoding failure: t0=" + to_string(t0)
-            + ", 2·deg(σ₁)=" + to_string(2 * poly_deg(sigma1))
+            + ", 2deg(sigma_1)=" + to_string(2 * poly_deg(sigma1))
             + ", R=" + to_string(R));
     }
-    if (t0 > R) {
-        throw RSDecodeError("Radius exceeded: t₀ = " +
-            to_string(t0) + " > R = " + to_string(R));
-    }
-
     int t1_est = poly_deg(sigma1);
     if (t0 + 2 * t1_est > R) {
-        throw RSDecodeError("Radius exceeded: t₀ + 2·t₁ = " +
+        throw RSDecodeError("Radius exceeded: t0 + 2t_1 = " +
             to_string(t0 + 2 * t1_est) + " > R = " + to_string(R));
     }
-    // if (t0 == R && t1_est == 0 && poly_deg(omega) == R - 1)
-    //     throw RSDecodeError("σ1 trivial while t0 == R : uncorrectable");
 
     
     vector<int> sigma = combine_locators(sigma0, sigma1);
     vector<int> error_pos = find_error_positions(sigma);
     if ((int)error_pos.size() != poly_deg(sigma)) {
-        throw RSDecodeError("Locator degree ≠ number of roots found (beyond radius)");
+        throw RSDecodeError("Locator degree != number of roots found (beyond radius)");
+    }
+
+    vector<int> xn_minus_1(64, 0); 
+    xn_minus_1[0] = 1;
+    xn_minus_1[63] = gf_sub(0, 1); 
+
+    auto [qqq, rrr] = poly_divmod(xn_minus_1, sigma);
+    if (poly_deg(rem) != -1) {
+        throw RSDecodeError("Condition (C) violated");
     }
 
     auto error_mag = evaluate_error_magnitudes(sigma, omega, error_pos);
@@ -493,63 +374,7 @@ vector<int> rs_decode(const vector<int>& received, const vector<int>& erasures) 
         throw RSDecodeError("Syndrome non-zero after correction (beyond radius)");
     }
 
-    return vector<int>(corrected.end() - K, corrected.end());  // last K symbols
-}
-
-vector<vector<int>> interpolate_gs_poly(const vector<int>& xs, const vector<int>& ys, int dA, int dB) {
-    int m = xs.size();
-    int num_unknowns = dA + dB + 2;
-
-    vector<vector<int>> A(m, vector<int>(num_unknowns, 0));
-    vector<int> b(m, 0);
-
-    for (int i = 0; i < m; ++i) {
-        int x = xs[i];
-        int y = ys[i];
-
-        int xp = 1;
-        for (int j = 0; j <= dA; ++j) {
-            A[i][j] = xp;
-            xp = gf_mul(xp, x);
-        }
-
-        int yp = y;
-        xp = 1;
-        for (int j = 0; j <= dB; ++j) {
-            A[i][dA + 1 + j] = gf_mul(yp, xp);
-            xp = gf_mul(xp, x);
-        }
-
-        b[i] = 0;
-    }
-
-    vector<int> sol;
-    bool ok = solve_linear_system(A, b, sol);
-    if (!ok) throw RSDecodeError("GS interpolation failed");
-
-    // Split solution into A(x) and B(x)
-    vector<int> Acoeffs(sol.begin(), sol.begin() + dA + 1);
-    vector<int> Bcoeffs(sol.begin() + dA + 1, sol.end());
-    return {Acoeffs, Bcoeffs}; // Q(x, y) = A(x) + B(x) * y
-}
-vector<int> gs_decode(const vector<int>& received) {
-    vector<int> xs, ys;
-    for (int i = 0; i < N; ++i) {
-        xs.push_back(EXP_TABLE[i + 1]);
-        ys.push_back(received[i]);
-    }
-
-    vector<vector<int>> Q = interpolate_gs_poly(xs, ys, K - 1, K - 2);
-    vector<int> A = Q[0];
-    vector<int> B = Q[1];
-
-    if (poly_deg(B) < 0) throw RSDecodeError("Degenerate Q(x,y) in GS decode");
-
-    vector<int> f = poly_divmod(poly_trim(poly_scale(A, gf_sub(0, 1))), poly_trim(B)).first;
-
-    if (poly_deg(f) >= K) throw RSDecodeError("Decoded polynomial exceeds degree");
-
-    return f;
+    return vector<int>(corrected.end() - K, corrected.end());  
 }
 
 int main() {
@@ -558,15 +383,6 @@ int main() {
 
     ifstream infile("input.txt");
     ofstream outfile("output.txt");
-
-    if (!infile.is_open()) {
-        cerr << "❌ Cannot open input.txt\n";
-        return 1;
-    }
-    if (!outfile.is_open()) {
-        cerr << "❌ Cannot open output.txt\n";
-        return 1;
-    }
 
     string line;
     int line_num = 0;
@@ -580,7 +396,7 @@ int main() {
         int pos = 0;
         while (iss >> token) {
             if (token == "*") {
-                received.push_back(0); // use 0 for erased symbol
+                received.push_back(0); 
                 erasures.push_back(pos);
             } else {
                 received.push_back(stoi(token));
@@ -589,20 +405,18 @@ int main() {
         }
 
         try {
-            // vector<int> decoded = gs_decode(received);
             vector<int> decoded = rs_decode(received, erasures);
-            // for (int v : decoded) outfile << v << " ";
             for (int i = 0; i < K; ++i) {
                 outfile << decoded[i]; if (i < K - 1) outfile << " ";
             }
 
             outfile << "\n";
         } catch (const RSDecodeError& e) {
-            cerr << "❌ Line " << line_num << ": " << e.what() << "\n";
+            cerr << " Line " << line_num << ": " << e.what() << "\n";
             for (int i = 0; i < K; ++i) outfile << "* ";
             outfile << "\n";
         } catch (const exception& e) {
-            cerr << "❌ Line " << line_num << ": Unexpected error: " << e.what() << "\n";
+            cerr << " Line " << line_num << ": Unexpected error: " << e.what() << "\n";
             for (int i = 0; i < K; ++i) outfile << "* ";
             outfile << "\n";
         }
@@ -611,6 +425,6 @@ int main() {
     infile.close();
     outfile.close();
 
-    cout << "✅ Decoding complete. Results saved to output.txt\n";
+    cout << " Decoding complete. Results saved to output.txt\n";
     return 0;
 }
